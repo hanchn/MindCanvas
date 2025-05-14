@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <title>脑图画布编辑器</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        font-family: sans-serif;
+      }
+      #canvas {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        background: #f0f0f0;
+      }
+      .node {
+        position: absolute;
+        background: white;
+        border: 2px solid #999;
+        border-radius: 4px;
+        padding: 6px 12px;
+        user-select: none;
+        min-width: 80px;
+        min-height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: default;
+      }
+      .node.dragging {
+        cursor: move;
+      }
+      .node.selected {
+        border-color: #007bff;
+        background: #e6f0ff;
+      }
+      .handle {
+        width: 8px;
+        height: 8px;
+        background: #333;
+        border-radius: 50%;
+        position: absolute;
+        display: none;
+        z-index: 10;
+        cursor: crosshair;
+      }
+      .handle.selected {
+        background: red;
+      }
+      .node:hover .handle {
+        display: block;
+      }
+      .handle.top {
+        top: -5px;
+        left: 50%;
+        transform: translateX(-50%);
+      }
+      .handle.right {
+        right: -5px;
+        top: 50%;
+        transform: translateY(-50%);
+      }
+      .handle.bottom {
+        bottom: -5px;
+        left: 50%;
+        transform: translateX(-50%);
+      }
+      .handle.left {
+        left: -5px;
+        top: 50%;
+        transform: translateY(-50%);
+      }
+      svg {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+      }
+      svg line {
+        pointer-events: stroke;
+        stroke-width: 2;
+        cursor: pointer;
+      }
+      svg line:hover {
+        stroke-width: 4;
+      }
+      .edit-input {
+        width: 100%;
+        border: none;
+        font-size: 14px;
+        font-family: inherit;
+        background: transparent;
+        text-align: center;
+      }
+      /* 添加拖拽图标样式 */
+      .drag-icon {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 16px;
+        height: 16px;
+        background: #666;
+        border-radius: 2px;
+        display: none;
+        cursor: move;
+      }
+      .node:hover .drag-icon {
+        display: block;
+      }
+      /* 添加自动格式化按钮样式 */
+      #auto-format {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        padding: 8px 16px;
+        background: #007bff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        z-index: 100;
+      }
+      #auto-format:hover {
+        background: #0056b3;
+      }
+      /* 添加布局选择器样式 */
+      #layout-options {
+        position: fixed;
+        bottom: 20px;
+        right: 150px;
+        display: flex;
+        gap: 10px;
+        z-index: 100;
+      }
+      .layout-btn {
+        padding: 8px 16px;
+        background: #6c757d;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .layout-btn:hover {
+        background: #5a6268;
+      }
+      .layout-btn.active {
+        background: #28a745;
+      }
+      /* 添加颜色选择器样式 */
+      #color-picker {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        background: white;
+        padding: 10px;
+        border-radius: 4px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        z-index: 100;
+      }
+      .color-option {
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        cursor: pointer;
+        border: 2px solid transparent;
+      }
+      .color-option.active {
+        border-color: #333;
+      }
+      /* 连线右键菜单 */
+      #line-context-menu {
+        position: absolute;
+        background: white;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        padding: 5px 0;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        display: none;
+        z-index: 1000;
+      }
+      .menu-item {
+        padding: 8px 15px;
+        cursor: pointer;
+      }
+      .menu-item:hover {
+        background: #f0f0f0;
+      }
+      .color-submenu {
+        display: flex;
+        padding: 5px 15px;
+        gap: 5px;
+      }
+      .color-dot {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="canvas"></div>
+    <svg id="lines"></svg>
+    <div id="layout-options">
+      <button class="layout-btn active" data-direction="right">向右布局</button>
+      <button class="layout-btn" data-direction="down">向下布局</button>
+      <button class="layout-btn" data-direction="left">向左布局</button>
+      <button class="layout-btn" data-direction="up">向上布局</button>
+    </div>
+    <button id="auto-format">自动格式化</button>
+
+    <!-- 颜色选择器 -->
+    <div id="color-picker">
+      <div
+        class="color-option active"
+        style="background-color: #333"
+        data-color="#333"
+      ></div>
+      <div
+        class="color-option"
+        style="background-color: #007bff"
+        data-color="#007bff"
+      ></div>
+      <div
+        class="color-option"
+        style="background-color: #28a745"
+        data-color="#28a745"
+      ></div>
+      <div
+        class="color-option"
+        style="background-color: #dc3545"
+        data-color="#dc3545"
+      ></div>
+      <div
+        class="color-option"
+        style="background-color: #ffc107"
+        data-color="#ffc107"
+      ></div>
+      <div
+        class="color-option"
+        style="background-color: #6f42c1"
+        data-color="#6f42c1"
+      ></div>
+    </div>
+
+    <!-- 连线右键菜单 -->
+    <div id="line-context-menu">
+      <div class="menu-item">删除连线</div>
+      <div class="menu-item">更改颜色</div>
+      <div class="color-submenu">
+        <div
+          class="color-dot"
+          style="background-color: #333"
+          data-color="#333"
+        ></div>
+        <div
+          class="color-dot"
+          style="background-color: #007bff"
+          data-color="#007bff"
+        ></div>
+        <div
+          class="color-dot"
+          style="background-color: #28a745"
+          data-color="#28a745"
+        ></div>
+        <div
+          class="color-dot"
+          style="background-color: #dc3545"
+          data-color="#dc3545"
+        ></div>
+        <div
+          class="color-dot"
+          style="background-color: #ffc107"
+          data-color="#ffc107"
+        ></div>
+        <div
+          class="color-dot"
+          style="background-color: #6f42c1"
+          data-color="#6f42c1"
+        ></div>
+      </div>
+    </div>
+
+    <script>
+      const canvas = document.getElementById("canvas");
+      const lines = document.getElementById("lines");
+      const autoFormatBtn = document.getElementById("auto-format");
+      const colorPicker = document.getElementById("color-picker");
+      const lineContextMenu = document.getElementById("line-context-menu");
+
+      let nodes = [];
+      let draggingNode = null;
+      let draggingLine = null;
+      let draggingFrom = null;
+      let connections = [];
+      let selectedColor = "#333"; // 默认连线颜色
+      let selectedLine = null; // 当前选中的连线
+      const MIN_GAP = 20;
+
+      function createNode(x, y) {
+        const node = {
+          id: "n" + Date.now(),
+          topic: "新节点",
+          x,
+          y,
+          element: null,
+        };
+        nodes.push(node);
+        renderAll();
+      }
+
+      function createNodeElement(node) {
+        const div = document.createElement("div");
+        div.className = "node";
+        div.style.left = node.x + "px";
+        div.style.top = node.y + "px";
+
+        const input = document.createElement("input");
+        input.className = "edit-input";
+        input.value = node.topic;
+        input.onclick = (e) => e.stopPropagation();
+        input.oninput = () => (node.topic = input.value);
+        div.appendChild(input);
+
+        // 添加拖拽图标
+        const dragIcon = document.createElement("div");
+        dragIcon.className = "drag-icon";
+        dragIcon.onmousedown = (e) => {
+          e.stopPropagation();
+          draggingNode = node;
+          node._dragOffsetX = e.pageX - node.x;
+          node._dragOffsetY = e.pageY - node.y;
+          div.classList.add("dragging");
+        };
+        div.appendChild(dragIcon);
+
+        ["top", "right", "bottom", "left"].forEach((pos) => {
+          const handle = document.createElement("div");
+          handle.className = `handle ${pos}`;
+          handle.onmousedown = (e) => {
+            e.stopPropagation();
+            draggingFrom = node;
+            draggingLine = document.createElementNS(
+              "http://www.w3.org/2000/svg",
+              "line"
+            );
+            const coords = getNodeConnectionPoint(node, pos);
+            draggingLine.setAttribute("x1", coords.x);
+            draggingLine.setAttribute("y1", coords.y);
+            draggingLine.setAttribute("x2", coords.x);
+            draggingLine.setAttribute("y2", coords.y);
+            draggingLine.setAttribute("stroke", "blue");
+            draggingLine.setAttribute("stroke-width", "2");
+            lines.appendChild(draggingLine);
+          };
+          div.appendChild(handle);
+        });
+
+        div.onmousedown = (e) => {
+          if (
+            e.target.tagName !== "INPUT" &&
+            !e.target.classList.contains("drag-icon") &&
+            !e.target.classList.contains("handle")
+          ) {
+            draggingNode = node;
+            node._dragOffsetX = e.pageX - node.x;
+            node._dragOffsetY = e.pageY - node.y;
+            div.classList.add("dragging");
+          }
+        };
+
+        div.onmouseup = (e) => {
+          div.classList.remove("dragging");
+          if (draggingFrom && draggingFrom !== node) {
+            connections.push({ from: draggingFrom, to: node });
+            draggingFrom = null;
+            if (draggingLine) {
+              draggingLine.remove();
+              draggingLine = null;
+            }
+            renderAll();
+          }
+        };
+
+        node.element = div;
+        canvas.appendChild(div);
+      }
+
+      // 获取节点连接点的坐标
+      function getNodeConnectionPoint(node, position) {
+        if (!node.element) return { x: 0, y: 0 };
+
+        const rect = node.element.getBoundingClientRect();
+        const width = rect.width;
+        const height = rect.height;
+
+        switch (position) {
+          case "top":
+            return { x: node.x + width / 2, y: node.y };
+          case "right":
+            return { x: node.x + width, y: node.y + height / 2 };
+          case "bottom":
+            return { x: node.x + width / 2, y: node.y + height };
+          case "left":
+            return { x: node.x, y: node.y + height / 2 };
+          default:
+            return { x: node.x + width / 2, y: node.y + height / 2 };
+        }
+      }
+
+      // 计算两个节点之间最佳的连接点
+      function calculateBestConnectionPoints(fromNode, toNode) {
+        const positions = ["top", "right", "bottom", "left"];
+        let minDistance = Infinity;
+        let bestPoints = { from: null, to: null };
+
+        for (const fromPos of positions) {
+          const fromPoint = getNodeConnectionPoint(fromNode, fromPos);
+
+          for (const toPos of positions) {
+            const toPoint = getNodeConnectionPoint(toNode, toPos);
+
+            const distance = Math.sqrt(
+              Math.pow(fromPoint.x - toPoint.x, 2) +
+                Math.pow(fromPoint.y - toPoint.y, 2)
+            );
+
+            if (distance < minDistance) {
+              minDistance = distance;
+              bestPoints = {
+                from: { x: fromPoint.x, y: fromPoint.y, pos: fromPos },
+                to: { x: toPoint.x, y: toPoint.y, pos: toPos },
+              };
+            }
+          }
+        }
+
+        return bestPoints;
+      }
+
+      function resolveCollisions(movedNode) {
+        const buffer = MIN_GAP;
+        nodes.forEach((other) => {
+          if (other === movedNode) return;
+          const a = movedNode.element.getBoundingClientRect();
+          const b = other.element.getBoundingClientRect();
+          const overlapX =
+            a.left < b.right + buffer && a.right + buffer > b.left;
+          const overlapY =
+            a.top < b.bottom + buffer && a.bottom + buffer > b.top;
+          if (overlapX && overlapY) {
+            movedNode.x += MIN_GAP;
+            movedNode.y += MIN_GAP;
+          }
+        });
+      }
+
+      function renderAll() {
+        canvas.querySelectorAll(".node").forEach((e) => e.remove());
+        lines.innerHTML = "";
+        nodes.forEach((node) => createNodeElement(node));
+        connections.forEach((conn) =>
+          drawLineBetween(conn.from, conn.to, conn.color || selectedColor)
+        );
+      }
+
+      function drawLineBetween(from, to, color = "#333") {
+        if (!from.element || !to.element) return;
+
+        const bestPoints = calculateBestConnectionPoints(from, to);
+
+        const line = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "line"
+        );
+        line.setAttribute("x1", bestPoints.from.x);
+        line.setAttribute("y1", bestPoints.from.y);
+        line.setAttribute("x2", bestPoints.to.x);
+        line.setAttribute("y2", bestPoints.to.y);
+        line.setAttribute("stroke", color);
+        line.setAttribute("stroke-width", "2");
+        line.setAttribute("data-from-id", from.id);
+        line.setAttribute("data-to-id", to.id);
+
+        // 添加鼠标右键事件
+        line.addEventListener("contextmenu", (e) => {
+          e.preventDefault();
+          selectedLine = {
+            element: line,
+            connection: connections.find(
+              (conn) => conn.from.id === from.id && conn.to.id === to.id
+            ),
+          };
+          showLineContextMenu(e.clientX, e.clientY);
+        });
+
+        lines.appendChild(line);
+        return line;
+      }
+
+      // 显示连线右键菜单
+      function showLineContextMenu(x, y) {
+        lineContextMenu.style.display = "block";
+        lineContextMenu.style.left = x + "px";
+        lineContextMenu.style.top = y + "px";
+      }
+
+      // 隐藏连线右键菜单
+      function hideLineContextMenu() {
+        lineContextMenu.style.display = "none";
+      }
+
+      // 自动格式化节点布局
+      function autoFormatLayout() {
+        if (nodes.length === 0) return;
+
+        // 获取当前选择的布局方向
+        const activeDirection =
+          document.querySelector(".layout-btn.active").dataset.direction ||
+          "right";
+
+        // 找出根节点（入度为0的节点）
+        const inDegree = new Map();
+        nodes.forEach((node) => inDegree.set(node.id, 0));
+
+        connections.forEach((conn) => {
+          const toId = conn.to.id;
+          inDegree.set(toId, (inDegree.get(toId) || 0) + 1);
+        });
+
+        // 找出所有入度为0的节点作为根节点
+        const rootNodes = nodes.filter((node) => inDegree.get(node.id) === 0);
+
+        // 如果没有根节点，就选择第一个节点作为根节点
+        if (rootNodes.length === 0 && nodes.length > 0) {
+          rootNodes.push(nodes[0]);
+        }
+
+        // 从根节点开始布局
+        const centerX = canvas.clientWidth / 2;
+        const centerY = canvas.clientHeight / 2;
+
+        // 重置所有节点的位置
+        if (rootNodes.length === 1) {
+          // 单根节点情况 - 树形布局
+          const rootNode = rootNodes[0];
+
+          // 根据布局方向设置根节点位置
+          switch (activeDirection) {
+            case "right":
+              rootNode.x = 100;
+              rootNode.y = centerY;
+              break;
+            case "left":
+              rootNode.x = canvas.clientWidth - 200;
+              rootNode.y = centerY;
+              break;
+            case "down":
+              rootNode.x = centerX;
+              rootNode.y = 100;
+              break;
+            case "up":
+              rootNode.x = centerX;
+              rootNode.y = canvas.clientHeight - 200;
+              break;
+          }
+
+          // 构建节点的子节点映射
+          const childrenMap = new Map();
+          nodes.forEach((node) => childrenMap.set(node.id, []));
+
+          connections.forEach((conn) => {
+            const fromId = conn.from.id;
+            const to = conn.to;
+            const children = childrenMap.get(fromId) || [];
+            children.push(to);
+            childrenMap.set(fromId, children);
+          });
+
+          // 递归布局子节点，确保子节点在一列中对齐
+          layoutChildrenAligned(rootNode, childrenMap, 0, activeDirection);
+        } else {
+          // 多根节点情况 - 环形布局
+          const radius = Math.min(centerX, centerY) * 0.6;
+          const angleStep = (2 * Math.PI) / nodes.length;
+
+          nodes.forEach((node, index) => {
+            const angle = index * angleStep;
+            node.x = centerX + radius * Math.cos(angle);
+            node.y = centerY + radius * Math.sin(angle);
+          });
+        }
+
+        renderAll();
+      }
+
+      // 递归布局子节点，确保对齐
+      function layoutChildrenAligned(
+        parentNode,
+        childrenMap,
+        level,
+        direction
+      ) {
+        const children = childrenMap.get(parentNode.id) || [];
+        if (children.length === 0) return;
+
+        // 节点间距
+        const horizontalGap = 200;
+        const verticalGap = 100;
+
+        // 根据方向确定布局参数
+        let mainAxis, crossAxis, mainGap;
+
+        switch (direction) {
+          case "right":
+            mainAxis = "x";
+            crossAxis = "y";
+            mainGap = horizontalGap;
+            break;
+          case "left":
+            mainAxis = "x";
+            crossAxis = "y";
+            mainGap = -horizontalGap; // 负值表示向左
+            break;
+          case "down":
+            mainAxis = "y";
+            crossAxis = "x";
+            mainGap = verticalGap;
+            break;
+          case "up":
+            mainAxis = "y";
+            crossAxis = "x";
+            mainGap = -verticalGap; // 负值表示向上
+            break;
+        }
+
+        // 设置每个子节点的位置
+        children.forEach((child, index) => {
+          // 主轴上的位置是父节点位置加上间距
+          child[mainAxis] = parentNode[mainAxis] + mainGap;
+
+          // 交叉轴上保持与父节点相同位置，确保一列对齐
+          child[crossAxis] = parentNode[crossAxis];
+
+          // 递归布局子节点的子节点
+          const grandchildren = childrenMap.get(child.id) || [];
+
+          // 如果有孙子节点，先处理它们，然后再调整当前子节点的位置
+          if (grandchildren.length > 0) {
+            layoutChildrenAligned(child, childrenMap, level + 1, direction);
+          }
+        });
+
+        // 第二次遍历，处理同级节点之间的垂直间距
+        // 这确保了同级节点不会重叠
+        let lastPos = null;
+        const gap =
+          direction === "right" || direction === "left"
+            ? verticalGap
+            : horizontalGap;
+
+        // 根据方向排序子节点
+        const sortedChildren = [...children].sort(
+          (a, b) => a[crossAxis] - b[crossAxis]
+        );
+
+        sortedChildren.forEach((child) => {
+          if (lastPos !== null) {
+            // 确保节点之间有足够的间距
+            child[crossAxis] = lastPos + gap;
+          }
+          lastPos = child[crossAxis];
+        });
+      }
+
+      document.addEventListener("mousemove", (e) => {
+        if (draggingNode) {
+          draggingNode.x = e.pageX - draggingNode._dragOffsetX;
+          draggingNode.y = e.pageY - draggingNode._dragOffsetY;
+          renderAll();
+        }
+        if (draggingLine && draggingFrom) {
+          const fromPos = draggingLine.getAttribute("data-from-pos") || "right";
+          const fromPoint = getNodeConnectionPoint(draggingFrom, fromPos);
+          draggingLine.setAttribute("x1", fromPoint.x);
+          draggingLine.setAttribute("y1", fromPoint.y);
+          draggingLine.setAttribute("x2", e.pageX);
+          draggingLine.setAttribute("y2", e.pageY);
+        }
+      });
+
+      document.addEventListener("mouseup", () => {
+        if (draggingNode) {
+          draggingNode.element.classList.remove("dragging");
+          resolveCollisions(draggingNode);
+          renderAll();
+          draggingNode = null;
+        }
+        if (draggingLine) {
+          draggingLine.remove();
+          draggingLine = null;
+          draggingFrom = null;
+        }
+      });
+
+      // 修复双击创建节点功能
+      canvas.addEventListener("dblclick", (e) => {
+        // 确保点击的是画布本身，而不是节点或其他元素
+        if (e.target === canvas) {
+          createNode(e.pageX, e.pageY);
+        }
+      });
+
+      // 点击空白处隐藏右键菜单
+      document.addEventListener("click", (e) => {
+        if (!lineContextMenu.contains(e.target)) {
+          hideLineContextMenu();
+        }
+      });
+
+      // 添加布局选择按钮事件监听
+      document.querySelectorAll(".layout-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          // 移除所有按钮的active类
+          document
+            .querySelectorAll(".layout-btn")
+            .forEach((b) => b.classList.remove("active"));
+          // 为当前点击的按钮添加active类
+          btn.classList.add("active");
+        });
+      });
+
+      // 添加颜色选择器事件监听
+      colorPicker.querySelectorAll(".color-option").forEach((option) => {
+        option.addEventListener("click", () => {
+          // 移除所有选项的active类
+          colorPicker
+            .querySelectorAll(".color-option")
+            .forEach((opt) => opt.classList.remove("active"));
+          // 为当前点击的选项添加active类
+          option.classList.add("active");
+          // 更新选中的颜色
+          selectedColor = option.dataset.color;
+        });
+      });
+
+      // 添加连线右键菜单事件监听
+      lineContextMenu
+        .querySelector(".menu-item:first-child")
+        .addEventListener("click", () => {
+          if (selectedLine) {
+            // 删除连线
+            connections = connections.filter(
+              (conn) =>
+                !(
+                  conn.from.id === selectedLine.connection.from.id &&
+                  conn.to.id === selectedLine.connection.to.id
+                )
+            );
+            renderAll();
+            hideLineContextMenu();
+          }
+        });
+
+      // 添加连线颜色选择事件监听
+      lineContextMenu.querySelectorAll(".color-dot").forEach((dot) => {
+        dot.addEventListener("click", () => {
+          if (selectedLine) {
+            // 更新连线颜色
+            selectedLine.connection.color = dot.dataset.color;
+            renderAll();
+            hideLineContextMenu();
+          }
+        });
+      });
+
+      // 添加自动格式化按钮事件监听
+      autoFormatBtn.addEventListener("click", autoFormatLayout);
+
+      renderAll();
+    </script>
+  </body>
+</html>
